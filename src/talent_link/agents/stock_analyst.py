@@ -1,21 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-股票分析员 - OpenClaw Talent Link 第一个数字员工
-基于 Multi-Agent 架构的 A 股智能分析系统
+股票分析员 - OpenClaw Talent Link 核心数字员工
+支持港股(HK)和A股(A股)的7-Agent多智能体分析系统
 """
 
-import json
-from dataclasses import dataclass, field
+import sys
+from pathlib import Path
 from datetime import datetime
-from typing import Optional, Literal
 from enum import Enum
+from dataclasses import dataclass, field, asdict
+from typing import Optional, Literal
+
+# 路径设置
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from talent_link.agents.technical import TechnicalAgent
+from talent_link.agents.fundamental import FundamentalAgent
+from talent_link.agents.sentiment import SentimentAgent
+from talent_link.agents.bull import BullAgent
+from talent_link.agents.bear import BearAgent
+from talent_link.agents.trader import TraderAgent
+from talent_link.agents.risk import RiskAgent
+from talent_link.skills.data_fetcher import DataFetcher
 
 
-class Signal(Enum):
-    BUY = "买入"
-    HOLD = "持有"
-    SELL = "卖出"
-    WATCH = "观望"
+class MarketType(Enum):
+    HK = "港股"
+    A = "A股"
 
 
 @dataclass
@@ -23,6 +34,7 @@ class MarketData:
     """市场数据"""
     symbol: str
     name: str
+    market: str  # "港股" or "A股"
     current_price: float
     change_percent: float
     volume: int
@@ -32,104 +44,20 @@ class MarketData:
     open: float
     prev_close: float
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-
-
-@dataclass
-class TechnicalView:
-    """技术面分析结果"""
-    confidence: float
-    trend: str  # "上升" / "下降" / "震荡"
-    support_levels: list[float]
-    resistance_levels: list[float]
-    indicators: dict
-    summary: str
-
-
-@dataclass
-class FundamentalView:
-    """基本面分析结果"""
-    confidence: float
-    revenue_growth: Optional[float]
-    valuation: str  # "低估" / "合理" / "高估"
-    pe_ratio: Optional[float]
-    summary: str
-
-
-@dataclass
-class SentimentView:
-    """情绪面分析结果"""
-    confidence: float
-    news_sentiment: str  # "积极" / "中性" / "消极"
-    social_heat: float  # 0-10
-    institutional_sentiment: str
-    summary: str
-
-
-@dataclass
-class DebateResult:
-    """多空辩论结果"""
-    confidence: float
-    target_price: float
-    thesis: str
-    key_points: list[str]
-    risk_factors: list[str]
-
-
-@dataclass
-class TradingSignal:
-    """交易信号"""
-    signal: Signal
-    entry_price: Optional[float]
-    target_price: Optional[float]
-    stop_loss: Optional[float]
-    rationale: str
-
-
-@dataclass
-class RiskAssessment:
-    """风控评估"""
-    approval: Literal["approved", "rejected", "pending"]
-    max_position: str  # e.g., "10%"
-    risk_level: str  # "低" / "中" / "高"
-    conditions: list[str] = field(default_factory=list)
-    rejection_reason: Optional[str] = None
-
-
-@dataclass
-class StockAnalystReport:
-    """完整分析报告"""
-    meta: dict
-    market_data: MarketData
-    technical: TechnicalView
-    fundamental: FundamentalView
-    sentiment: SentimentView
-    bull_case: DebateResult
-    bear_case: DebateResult
-    signal: TradingSignal
-    risk: RiskAssessment
-    final_recommendation: dict
-
-    def to_dict(self) -> dict:
-        return {
-            "meta": self.meta,
-            "market_data": self.market_data.__dict__,
-            "technical": self.technical.__dict__,
-            "fundamental": self.fundamental.__dict__,
-            "sentiment": self.sentiment.__dict__,
-            "bull_case": self.bull_case.__dict__,
-            "bear_case": self.bear_case.__dict__,
-            "signal": self.signal.__dict__,
-            "risk": self.risk.__dict__,
-            "final_recommendation": self.final_recommendation
-        }
+    # A股额外字段
+    amplitude: Optional[float] = None  # 振幅
+    pe_ratio: Optional[float] = None  # 市盈率
+    pb_ratio: Optional[float] = None  # 市净率
+    market_cap: Optional[float] = None  # 总市值
+    float_market_cap: Optional[float] = None  # 流通市值
 
 
 class StockAnalyst:
     """
-    股票分析员 - A 股多智能体分析系统
+    股票分析员 - 港股+A股多智能体分析系统
     
     工作流程:
-    1. 数据获取 (AkShare)
+    1. 数据获取 (Yahoo Finance港股 / AkShare A股)
     2. 三分析师并行 (技术面 / 基本面 / 情绪面)
     3. 多空辩论 (看多 vs 看空)
     4. 交易信号生成
@@ -140,172 +68,206 @@ class StockAnalyst:
     def __init__(self, symbol: str, name: str = None):
         self.symbol = symbol
         self.name = name or symbol
-        self.report: Optional[StockAnalystReport] = None
+        self.report: Optional[dict] = None
+        self.data_fetcher = DataFetcher()
+        
+        # 判断市场类型
+        if symbol.endswith('.HK'):
+            self.market = MarketType.HK
+        elif symbol.isdigit() and len(symbol) == 6:
+            self.market = MarketType.A
+        else:
+            self.market = MarketType.HK  # 默认港股
+        
+        # 初始化7个Agent
+        self.tech_agent = TechnicalAgent()
+        self.fund_agent = FundamentalAgent()
+        self.sent_agent = SentimentAgent()
+        self.bull_agent = BullAgent()
+        self.bear_agent = BearAgent()
+        self.trader_agent = TraderAgent()
+        self.risk_agent = RiskAgent()
 
-    def analyze(self) -> StockAnalystReport:
-        """
-        执行完整的 7 步分析流程
-        """
+    def analyze(self) -> dict:
+        """执行完整的7步分析流程"""
+        print(f"🔍 开始分析 {self.symbol} ({self.market.value}) @ {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        
         # Step 1: 获取数据
         market_data = self._fetch_data()
+        if not market_data:
+            return {"error": f"数据获取失败: {self.symbol}"}
         
-        # Step 2: 三分析师并行分析
-        tech_view = self._analyze_technical(market_data)
-        fund_view = self._analyze_fundamental(market_data)
-        sent_view = self._analyze_sentiment(market_data)
+        # 转换为dict供agents使用
+        market_dict = asdict(market_data)
+        
+        # Step 2: 三分析师并行
+        tech_view = self.tech_agent.analyze(market_dict)
+        fund_view = self.fund_agent.analyze(market_dict)
+        sent_view = self.sent_agent.analyze(market_dict)
         
         # Step 3: 多空辩论
-        bull = self._bull_debate(tech_view, fund_view, sent_view, market_data)
-        bear = self._bear_debate(tech_view, fund_view, sent_view, market_data)
+        debate_input = {
+            'technical': tech_view,
+            'fundamental': fund_view,
+            'sentiment': sent_view,
+            'market_data': market_dict
+        }
+        bull_case = self.bull_agent.debate(debate_input)
+        bear_case = self.bear_agent.debate(debate_input)
         
         # Step 4: 生成交易信号
-        signal = self._generate_signal(bull, bear, market_data)
+        signal = self.trader_agent.generate_signal(bull_case, bear_case, market_dict)
         
         # Step 5: 风控审核
-        risk = self._risk_check(signal, market_data)
+        risk = self.risk_agent.evaluate(signal, market_dict)
         
-        # Step 6: 生成最终报告
-        self.report = StockAnalystReport(
-            meta={
-                "symbol": self.symbol,
-                "name": self.name,
-                "analysis_time": datetime.now().isoformat(),
-                "version": "1.0.0",
-                "engine": "OpenClaw Talent Link"
-            },
-            market_data=market_data,
-            technical=tech_view,
-            fundamental=fund_view,
-            sentiment=sent_view,
-            bull_case=bull,
-            bear_case=bear,
-            signal=signal,
-            risk=risk,
-            final_recommendation=self._final_decision(signal, risk)
+        # Step 6: 生成报告
+        self.report = self._build_report(
+            market_data, tech_view, fund_view, sent_view,
+            bull_case, bear_case, signal, risk
         )
         
         return self.report
 
     def _fetch_data(self) -> MarketData:
-        """获取 A 股市场数据 (通过 AkShare)"""
-        # TODO: 接入 AkShare
-        # 示例数据，实际使用时替换为真实接口
+        """获取市场数据"""
+        data = self.data_fetcher.fetch(self.symbol, self.market.value)
+        
+        if not data:
+            return None
+        
         return MarketData(
             symbol=self.symbol,
             name=self.name,
-            current_price=0.0,
-            change_percent=0.0,
-            volume=0,
-            turnover=0.0,
-            high=0.0,
-            low=0.0,
-            open=0.0,
-            prev_close=0.0
+            market=self.market.value,
+            current_price=data.get('current_price', 0),
+            change_percent=data.get('change_percent', 0),
+            volume=data.get('volume', 0),
+            turnover=data.get('turnover', 0),
+            high=data.get('high', 0),
+            low=data.get('low', 0),
+            open=data.get('open', 0),
+            prev_close=data.get('prev_close', 0),
+            amplitude=data.get('amplitude'),
+            pe_ratio=data.get('pe_ratio'),
+            pb_ratio=data.get('pb_ratio'),
+            market_cap=data.get('market_cap'),
+            float_market_cap=data.get('float_market_cap'),
         )
 
-    def _analyze_technical(self, data: MarketData) -> TechnicalView:
-        """技术面分析"""
-        # TODO: 实现技术指标计算 (RSI/MACD/布林带)
-        return TechnicalView(
-            confidence=0.7,
-            trend="震荡",
-            support_levels=[data.current_price * 0.95],
-            resistance_levels=[data.current_price * 1.05],
-            indicators={},
-            summary="技术面分析"
+    def _build_report(self, market_data, tech, fund, sent, bull, bear, signal, risk) -> dict:
+        """构建完整报告"""
+        # 综合信心度
+        confidence = (
+            tech.get('confidence', 0.5) * 0.3 +
+            fund.get('confidence', 0.5) * 0.3 +
+            sent.get('confidence', 0.5) * 0.2 +
+            bull.get('confidence', 0.5) * 0.1 +
+            bear.get('confidence', 0.5) * 0.1
         )
-
-    def _analyze_fundamental(self, data: MarketData) -> FundamentalView:
-        """基本面分析"""
-        # TODO: 接入财务数据
-        return FundamentalView(
-            confidence=0.6,
-            revenue_growth=None,
-            valuation="合理",
-            pe_ratio=None,
-            summary="基本面分析"
-        )
-
-    def _analyze_sentiment(self, data: MarketData) -> SentimentView:
-        """情绪面分析"""
-        # TODO: 接入新闻/舆情数据
-        return SentimentView(
-            confidence=0.5,
-            news_sentiment="中性",
-            social_heat=5.0,
-            institutional_sentiment="中性",
-            summary="情绪面分析"
-        )
-
-    def _bull_debate(self, tech, fund, sent, data) -> DebateResult:
-        """看多辩论"""
-        return DebateResult(
-            confidence=0.65,
-            target_price=data.current_price * 1.15,
-            thesis="看多理由",
-            key_points=[],
-            risk_factors=[]
-        )
-
-    def _bear_debate(self, tech, fund, sent, data) -> DebateResult:
-        """看空辩论"""
-        return DebateResult(
-            confidence=0.55,
-            target_price=data.current_price * 0.90,
-            thesis="看空理由",
-            key_points=[],
-            risk_factors=[]
-        )
-
-    def _generate_signal(self, bull: DebateResult, bear: DebateResult, data: MarketData) -> TradingSignal:
-        """生成交易信号"""
-        if bull.confidence > bear.confidence + 0.15:
-            signal = Signal.BUY
-        elif bear.confidence > bull.confidence + 0.15:
-            signal = Signal.SELL
-        else:
-            signal = Signal.WATCH
         
-        return TradingSignal(
-            signal=signal,
-            entry_price=data.current_price,
-            target_price=(bull.target_price * 0.6 + bear.target_price * 0.4),
-            stop_loss=data.current_price * 0.95,
-            rationale="基于多空辩论生成"
-        )
-
-    def _risk_check(self, signal: TradingSignal, data: MarketData) -> RiskAssessment:
-        """风控审核"""
-        if abs(data.change_percent) > 9:
-            return RiskAssessment(
-                approval="rejected",
-                max_position="5%",
-                risk_level="高",
-                rejection_reason="日内涨跌幅过大，风险较高"
-            )
-        return RiskAssessment(
-            approval="approved",
-            max_position="10%",
-            risk_level="中"
-        )
-
-    def _final_decision(self, signal: TradingSignal, risk: RiskAssessment) -> dict:
-        """最终决策"""
-        if risk.approval == "rejected":
-            return {
-                "action": "观望",
-                "reason": risk.rejection_reason
-            }
+        # 最终建议
+        if risk.get('approval') == 'rejected':
+            action = '观望'
+            reason = risk.get('rejection_reason', '风控审核未通过')
+        else:
+            action = signal.get('signal', '观望')
+            reason = signal.get('rationale', '')
+        
         return {
-            "action": signal.signal.value,
-            "entry": signal.entry_price,
-            "target": signal.target_price,
-            "stop": signal.stop_loss,
-            "position": risk.max_position
+            "meta": {
+                "symbol": self.symbol,
+                "name": self.name,
+                "market": self.market.value,
+                "analysis_time": datetime.now().isoformat(),
+                "version": "1.0.0",
+                "engine": "OpenClaw Talent Link"
+            },
+            "market_data": asdict(market_data),
+            "technical": tech,
+            "fundamental": fund,
+            "sentiment": sent,
+            "bull_case": bull,
+            "bear_case": bear,
+            "signal": signal,
+            "risk": risk,
+            "final_recommendation": {
+                "action": action,
+                "reason": reason,
+                "entry_price": signal.get('entry_price', market_data.current_price),
+                "target_price": signal.get('target_price'),
+                "stop_loss": signal.get('stop_loss'),
+                "max_position": risk.get('max_position', '10%'),
+                "confidence": round(confidence, 2)
+            }
         }
 
+    def to_text(self) -> str:
+        """输出文本格式报告"""
+        if not self.report:
+            return "请先调用 analyze() 方法"
+        
+        r = self.report
+        m = r['market_data']
+        bull = r['bull_case']
+        bear = r['bear_case']
+        sig = r['signal']
+        final = r['final_recommendation']
+        
+        lines = [
+            f"{'='*60}",
+            f"📊 {m['name']} ({m['symbol']}) {m['market']}分析报告",
+            f"📅 {r['meta']['analysis_time'][:19]}",
+            f"{'='*60}",
+            f"",
+            f"【市场数据']",
+            f"当前价格: {m['current_price']}元",
+            f"涨跌幅: {m['change_percent']:+.2f}%",
+            f"成交量: {m['volume']/10000:.1f}万手",
+            f"日内区间: {m['low']} - {m['high']}",
+            f"",
+            f"【技术面】信心 {r['technical'].get('confidence',0):.0%}",
+            f"趋势: {r['technical'].get('trend','N/A')}",
+            f"支撑: {r['technical'].get('support_levels',[])}",
+            f"阻力: {r['technical'].get('resistance_levels',[])}",
+            f"",
+            f"【基本面】信心 {r['fundamental'].get('confidence',0):.0%}",
+            f"估值: {r['fundamental'].get('valuation','N/A')}",
+            f"收入增长: {r['fundamental'].get('revenue_growth','N/A')}%",
+            f"",
+            f"【多空辩论']",
+            f"看多: {bull.get('target_price')}元 (信心 {bull.get('confidence',0):.0%})",
+            f"  {bull.get('thesis','')[:80]}",
+            f"看空: {bear.get('target_price')}元 (信心 {bear.get('confidence',0):.0%})",
+            f"  {bear.get('thesis','')[:80]}",
+            f"",
+            f"【交易信号】",
+            f"操作: {final.get('action')}",
+            f"入场: {final.get('entry_price')} → 目标: {final.get('target_price')} → 止损: {final.get('stop_loss')}",
+            f"",
+            f"【风控】",
+            f"仓位: {final.get('max_position')} | 信心: {final.get('confidence',0):.0%}",
+            f"",
+            f"{'='*60}",
+            f"⚠️ 仅供参考，不构成投资建议",
+        ]
+        return "\n".join(lines)
 
-def analyze(symbol: str, name: str = None) -> StockAnalystReport:
-    """快捷分析函数"""
-    agent = StockAnalyst(symbol, name)
-    return agent.analyze()
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("用法: python stock_analyst.py <股票代码>")
+        print("  港股示例: python stock_analyst.py 2513.HK")
+        print("  A股示例: python stock_analyst.py 000001")
+        sys.exit(1)
+    
+    symbol = sys.argv[1]
+    analyst = StockAnalyst(symbol)
+    report = analyst.analyze()
+    
+    if "error" in report:
+        print(f"错误: {report['error']}")
+    else:
+        print(analyst.to_text())
