@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Data Fetcher - 统一数据获取层
-支持港股(Yahoo Finance)和A股(AkShare)
+支持港股(Yahoo Finance)和A股(Tushare实时行情)
 """
 
 import subprocess
@@ -11,15 +11,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
-# AkShare - 在 _fetch_a_share 里做lazy import避免环境问题
-# 某些环境下 apport_python_hook 会干扰 pandas 的 platform 检测
-import sys
-if 'apport_python_hook' in sys.modules:
-    _apport_backup = sys.modules.pop('apport_python_hook')
-else:
-    _apport_backup = None
-
-AKSHARE_AVAILABLE = None  # None表示未检查，False表示不可用
+# Tushare - lazy import避免apport_hook干扰
+TUSHARE_AVAILABLE = None
+BAOSTOCK_AVAILABLE = None
 
 
 class DataFetcher:
@@ -77,10 +71,75 @@ class DataFetcher:
             return {}
     
     def _fetch_a_share(self, symbol: str) -> dict:
-        """获取A股数据 - 暂用Yahoo Finance备用方案"""
-        # 由于环境兼容性问题，暂用Yahoo Finance替代AkShare
-        print(f"A股使用Yahoo Finance备用方案: {symbol}")
-        return self._fetch_a_share_backup(symbol)
+        """获取A股数据 - Tushare子进程调用（绕过apport）+ Yahoo备用"""
+        # 优先通过子进程调用Tushare（隔离apport问题）
+        result = self._fetch_a_share_tushare_subprocess(symbol)
+        if result:
+            return result
+        
+        # Yahoo备用
+        print(f"A股 Tushare子进程失败，使用Yahoo备用: {symbol}")
+        return self._fetch_a_share_yahoo(symbol)
+    
+    def _fetch_a_share_tushare_subprocess(self, symbol: str) -> dict:
+        """通过子进程调用Tushare获取A股实时行情"""
+        try:
+            script = Path(__file__).parent / "tushare_fetcher.py"
+            result = subprocess.run(
+                ['/usr/bin/python3', str(script), symbol],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if result.returncode != 0:
+                return None
+            
+            import json
+            data = json.loads(result.stdout.strip())
+            
+            if 'error' in data:
+                return None
+            
+            # 转换为标准格式
+            return {
+                'symbol': data['symbol'],
+                'date': data.get('update_time', '')[:10],
+                'current': {
+                    'price': data['current_price'],
+                    'change_percent': data['change_percent'],
+                    'open': data['open'],
+                    'high': data['high'],
+                    'low': data['low'],
+                    'prev_close': data['prev_close'],
+                    'volume': data['volume'],
+                    'amount': data['amount'],
+                },
+                'history': [],
+                'info': {},
+                'current_price': data['current_price'],
+                'change_percent': data['change_percent'],
+                'volume': data['volume'],
+                'amount': data['amount'],
+                'high': data['high'],
+                'low': data['low'],
+                'open': data['open'],
+                'prev_close': data['prev_close'],
+                'source': 'tushare',
+            }
+        except Exception as e:
+            print(f"Tushare子进程失败 {symbol}: {e}")
+            return None
+    
+    def _fetch_a_share_yahoo(self, symbol: str) -> dict:
+        """A股Yahoo Finance备用方案"""
+        try:
+            if symbol.startswith('6'):
+                yahoo_sym = f"{symbol}.SS"
+            else:
+                yahoo_sym = f"{symbol}.SZ"
+            return self._fetch_hk_share(yahoo_sym)
+        except Exception as e:
+            print(f"A股Yahoo备用失败 {symbol}: {e}")
+            return {}
     
     def _fetch_a_share_backup(self, symbol: str) -> dict:
         """A股备用方案 - Yahoo Finance"""

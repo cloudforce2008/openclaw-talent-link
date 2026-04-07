@@ -3,7 +3,12 @@
 Web API - 数字人才市场股票分析接口
 """
 
+# 绕过 apport_python_hook 干扰（某些环境下会破坏 import）
 import sys
+for mod in ['apport_python_hook', 'apport', 'apport.report', 'apport.packaging_impl']:
+    if mod in sys.modules:
+        del sys.modules[mod]
+
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
