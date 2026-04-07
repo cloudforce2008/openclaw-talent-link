@@ -4,15 +4,24 @@
 支持港股(HK)和A股(A股)的7-Agent多智能体分析系统
 """
 
+# 绕过 apport_python_hook 干扰
 import sys
+for _mod in ['apport_python_hook', 'apport', 'apport.report', 'apport.packaging_impl']:
+    if _mod in sys.modules:
+        del sys.modules[_mod]
+
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Literal
 
-# 路径设置
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 路径设置 - 需要到 src/ 目录才能让 talent_link.agents.technical 生效
+# __file__ = src/talent_link/agents/stock_analyst.py
+# parent = src/talent_link/agents/
+# parent.parent = src/talent_link/
+# parent.parent.parent = src/
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from talent_link.agents.technical import TechnicalAgent
 from talent_link.agents.fundamental import FundamentalAgent
@@ -90,7 +99,12 @@ class StockAnalyst:
 
     def analyze(self) -> dict:
         """执行完整的7步分析流程"""
-        print(f"🔍 开始分析 {self.symbol} ({self.market.value}) @ {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        import sys
+        # JSON模式时将进度信息输出到stderr，避免污染stdout
+        if hasattr(sys, '_called_from_main_json') or __name__ != '__main__':
+            print(f"🔍 开始分析 {self.symbol} ({self.market.value}) @ {datetime.now().strftime('%Y-%m-%d %H:%M')}", file=sys.stderr)
+        else:
+            print(f"🔍 开始分析 {self.symbol} ({self.market.value}) @ {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         
         # Step 1: 获取数据
         market_data = self._fetch_data()
@@ -257,17 +271,32 @@ class StockAnalyst:
 if __name__ == "__main__":
     import sys
     
-    if len(sys.argv) < 2:
-        print("用法: python stock_analyst.py <股票代码>")
+    # 解析参数
+    args = sys.argv[1:]
+    output_json = '--json' in args
+    output_text = '--text' in args
+    symbol = [a for a in args if not a.startswith('--')][0] if args else None
+    
+    if not symbol:
+        print("用法: python stock_analyst.py <股票代码> [--json|--text]", file=sys.stderr if output_json else sys.stdout)
         print("  港股示例: python stock_analyst.py 2513.HK")
         print("  A股示例: python stock_analyst.py 000001")
+        print("  JSON输出: python stock_analyst.py 2513.HK --json")
         sys.exit(1)
     
-    symbol = sys.argv[1]
     analyst = StockAnalyst(symbol)
-    report = analyst.analyze()
     
-    if "error" in report:
-        print(f"错误: {report['error']}")
+    if output_json:
+        import json
+        sys._called_from_main_json = True  # 通知analyze()输出到stderr
+        report = analyst.analyze()
+        if "error" in report:
+            sys.stderr.write(f"错误: {report['error']}\n")
+            sys.exit(1)
+        sys.stdout.write(json.dumps(report, ensure_ascii=False, indent=2))
     else:
+        report = analyst.analyze()
+        if "error" in report:
+            sys.stderr.write(f"错误: {report['error']}\n")
+            sys.exit(1)
         print(analyst.to_text())
