@@ -16,6 +16,9 @@ const PORT = 8000;
 app.use(cors());
 app.use(express.json());
 
+// 静态文件服务（前端页面）
+app.use(express.static(path.join(__dirname, 'public')));
+
 // 股票分析引擎路径
 const PYTHON_PATH = '/usr/bin/python3';
 const ANALYZER_PATH = path.join(__dirname, '../../agents/stock_analyst.py');

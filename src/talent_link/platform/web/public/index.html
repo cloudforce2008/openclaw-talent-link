@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数字人才市场 - 股票分析</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f5f7fa;
+            color: #1a1a2e;
+            min-height: 100vh;
+        }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 24px 0;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+        }
+        .header-inner {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+        }
+        .header h1 span { color: #4facfe; }
+        .header-sub { font-size: 13px; color: #8892b0; margin-top: 4px; }
+        
+        /* Main */
+        .main {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 20px;
+        }
+        
+        /* Search Box */
+        .search-box {
+            background: white;
+            border-radius: 16px;
+            padding: 28px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+            margin-bottom: 24px;
+        }
+        .search-box h2 {
+            font-size: 16px;
+            color: #5a6c7d;
+            margin-bottom: 16px;
+            font-weight: 500;
+        }
+        .search-form {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .search-form input {
+            flex: 1;
+            min-width: 200px;
+            padding: 14px 18px;
+            border: 2px solid #e8ecf0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        .search-form input:focus {
+            border-color: #4facfe;
+        }
+        .search-form input::placeholder {
+            color: #a0aec0;
+        }
+        .search-form button {
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .search-form button:hover {
+            box-shadow: 0 4px 16px rgba(79, 172, 254, 0.4);
+            transform: translateY(-1px);
+        }
+        .search-form button:active { transform: translateY(0); }
+        .search-form button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        
+        .market-tags {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .market-tag {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            background: #e8ecf0;
+            color: #5a6c7d;
+        }
+        .market-tag.active { background: #1a1a2e; color: white; }
+        .market-tag span { margin-left: 4px; color: #8892b0; }
+        
+        .examples {
+            margin-top: 12px;
+            font-size: 13px;
+            color: #8892b0;
+        }
+        .examples a {
+            color: #4facfe;
+            cursor: pointer;
+            text-decoration: none;
+            margin: 0 4px;
+        }
+        .examples a:hover { text-decoration: underline; }
+        
+        /* Error */
+        .error-msg {
+            background: #fff1f0;
+            border: 1px solid #ffccc7;
+            border-radius: 10px;
+            padding: 16px;
+            color: #cf1322;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #5a6c7d;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid #e8ecf0;
+            border-top-color: #4facfe;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Report Card */
+        .report-card {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        }
+        
+        /* Stock Header */
+        .stock-header {
+            padding: 24px 28px;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .stock-name {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+        .stock-meta {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .stock-price {
+            font-size: 36px;
+            font-weight: 700;
+        }
+        .stock-price.up { color: #f5222d; }
+        .stock-price.down { color: #52c41a; }
+        .stock-change {
+            font-size: 18px;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        .stock-change.up { background: #fff1f0; color: #f5222d; }
+        .stock-change.down { background: #f6ffed; color: #52c41a; }
+        .stock-detail { font-size: 14px; color: #8892b0; margin-top: 4px; }
+        .stock-detail span { margin-right: 16px; }
+        
+        /* Section */
+        .report-section {
+            padding: 24px 28px;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .report-section:last-child { border-bottom: none; }
+        .section-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title .tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #e6f7ff;
+            color: #1890ff;
+            font-weight: 500;
+        }
+        
+        /* Analysis Grid */
+        .analysis-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 600px) {
+            .analysis-grid { grid-template-columns: 1fr; }
+        }
+        .analysis-item {
+            background: #f8f9fb;
+            border-radius: 10px;
+            padding: 14px;
+        }
+        .analysis-item .label { font-size: 12px; color: #8892b0; margin-bottom: 6px; }
+        .analysis-item .value { font-size: 20px; font-weight: 700; }
+        .analysis-item .sub { font-size: 12px; color: #8892b0; margin-top: 2px; }
+        
+        /* Bull/Bear */
+        .bull-bear { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+        @media (max-width: 600px) { .bull-bear { grid-template-columns: 1fr; } }
+        .bull-box, .bear-box {
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .bull-box { background: #f6ffed; border: 1px solid #b7eb8f; }
+        .bear-box { background: #fff1f0; border: 1px solid #ffccc7; }
+        .bb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .bb-title { font-size: 14px; font-weight: 600; }
+        .bb-title.bull { color: #52c41a; }
+        .bb-title.bear { color: #f5222d; }
+        .bb-target { font-size: 20px; font-weight: 700; }
+        .bb-conf { font-size: 12px; color: #8892b0; }
+        .bb-text { font-size: 13px; color: #5a6c7d; line-height: 1.6; }
+        
+        /* Signal */
+        .signal-box {
+            background: linear-gradient(135deg, #f0f5ff 0%, #e6f7ff 100%);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 16px;
+        }
+        .signal-action {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1890ff;
+            margin-bottom: 6px;
+        }
+        .signal-rationale { font-size: 13px; color: #5a6c7d; line-height: 1.6; margin-bottom: 12px; }
+        .signal-prices {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .signal-price-item {
+            background: white;
+            border-radius: 8px;
+            padding: 10px 14px;
+            text-align: center;
+            min-width: 80px;
+        }
+        .signal-price-item .label { font-size: 11px; color: #8892b0; margin-bottom: 4px; }
+        .signal-price-item .value { font-size: 16px; font-weight: 700; }
+        .signal-price-item .value.green { color: #52c41a; }
+        .signal-price-item .value.red { color: #f5222d; }
+        
+        /* Risk */
+        .risk-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .risk-item {
+            background: #f8f9fb;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+        }
+        .risk-item .label { color: #8892b0; font-size: 11px; margin-bottom: 2px; }
+        .risk-item .value { font-weight: 600; }
+        .risk-item .value.warn { color: #faad14; }
+        .risk-item .value.ok { color: #52c41a; }
+        
+        /* OpenRouter Table */
+        .router-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .router-table th {
+            background: #f8f9fb;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #5a6c7d;
+            border-bottom: 2px solid #e8ecf0;
+        }
+        .router-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .router-table tr:last-child td { border-bottom: none; }
+        .router-table .rank { font-weight: 700; color: #1a1a2e; }
+        .router-table .model { color: #5a6c7d; }
+        .router-table .vendor { font-weight: 600; }
+        .router-table .vendor.cn { color: #f5222d; }
+        .router-table .tokens { font-weight: 600; color: #1890ff; }
+        
+        /* Disclaimer */
+        .disclaimer {
+            padding: 16px 28px;
+            background: #fafafa;
+            font-size: 12px;
+            color: #a0aec0;
+            text-align: center;
+        }
+        
+        /* History */
+        .history-bar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .history-item {
+            padding: 6px 14px;
+            background: white;
+            border: 1px solid #e8ecf0;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .history-item:hover { border-color: #4facfe; color: #4facfe; }
+        .history-item .name { font-weight: 600; margin-right: 4px; }
+        .history-item .price { color: #8892b0; }
+        
+        /* Prompt hint */
+        .prompt-hint {
+            text-align: center;
+            padding: 60px 20px;
+            color: #8892b0;
+        }
+        .prompt-hint .icon { font-size: 48px; margin-bottom: 16px; }
+        .prompt-hint p { font-size: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-inner">
+        <div>
+            <h1>📊 <span>数字人才市场</span> - 股票分析</h1>
+            <div class="header-sub">港股 + A股 智能分析 · 7-Agent 多智能体系统</div>
+        </div>
+    </div>
+</div>
+
+<div class="main">
+    <!-- Search -->
+    <div class="search-box">
+        <div class="market-tags">
+            <div class="market-tag active" data-market="auto">自动识别 <span>| 沪深 / 港股</span></div>
+        </div>
+        <div class="search-form">
+            <input type="text" id="symbolInput" placeholder="输入股票代码，如 2513.HK、000001、600000" autofocus>
+            <button id="searchBtn" onclick="doSearch()">分析</button>
+        </div>
+        <div class="examples">
+            示例：
+            <a onclick="quickSearch('2513.HK')">2513.HK 智谱AI</a>
+            <a onclick="quickSearch('0100.HK')">0100.HK MiniMax</a>
+            <a onclick="quickSearch('000001')">000001 平安银行</a>
+            <a onclick="quickSearch('600519')">600519 贵州茅台</a>
+        </div>
+    </div>
+    
+    <!-- Error -->
+    <div id="errorBox" class="error-msg" style="display:none"></div>
+    
+    <!-- Loading -->
+    <div id="loadingBox" class="loading" style="display:none">
+        <div class="spinner"></div>
+        <div>正在分析...</div>
+    </div>
+    
+    <!-- Prompt -->
+    <div id="promptBox" class="prompt-hint">
+        <div class="icon">🔍</div>
+        <p>输入股票代码，开始分析</p>
+    </div>
+    
+    <!-- Report -->
+    <div id="reportBox" style="display:none"></div>
+</div>
+
+<script>
+const API = '/api/stock';
+
+// Auto-detect market
+function detectMarket(symbol) {
+    if (!symbol) return '港股';
+    if (/^\d{6}$/.test(symbol)) return 'A股';
+    if (symbol.endsWith('.HK') || symbol.endsWith('.SS') || symbol.endsWith('.SZ')) return '港股';
+    return '港股';
+}
+
+// Quick search
+function quickSearch(symbol) {
+    document.getElementById('symbolInput').value = symbol;
+    doSearch();
+}
+
+// Search
+async function doSearch() {
+    const input = document.getElementById('symbolInput').value.trim();
+    if (!input) return;
+    
+    showState('loading');
+    hideError();
+    
+    try {
+        const res = await fetch(`${API}/${encodeURIComponent(input)}`);
+        if (!res.ok) {
+            const err = await res.json();
+            showError(err.error || '分析失败');
+            showState('prompt');
+            return;
+        }
+        const data = await res.json();
+        renderReport(data);
+        addToHistory(input, data.market_data.current_price, data.market_data.change_percent, data.market_data.name);
+        showState('report');
+    } catch (e) {
+        showError('网络错误: ' + e.message);
+        showState('prompt');
+    }
+}
+
+// Render
+function renderReport(d) {
+    const m = d.market_data;
+    const bull = d.bull_case;
+    const bear = d.bear_case;
+    const sig = d.signal;
+    const final = d.final_recommendation;
+    const sent = d.sentiment;
+    const isUp = m.change_percent >= 0;
+    const changeClass = isUp ? 'up' : 'down';
+    const changeSign = isUp ? '+' : '';
+    
+    // Get OpenRouter leaderboard
+    const leaderboard = sent?.industry_signals?.global_leaderboard || [];
+    const insights = sent?.industry_signals?.insights || [];
+    
+    // Format bull/bear thesis
+    const bullLines = bull.thesis ? bull.thesis.split('\n').filter(l => l.trim()) : [];
+    const bearLines = bear.thesis ? bear.thesis.split('\n').filter(l => l.trim()) : [];
+    
+    let html = `
+    <div class="report-card">
+        <div class="stock-header">
+            <div class="stock-name">${m.name || m.symbol} <span style="font-size:14px;color:#8892b0;font-weight:400">${m.symbol}</span></div>
+            <div class="stock-meta">
+                <div class="stock-price ${changeClass}">${m.current_price}</div>
+                <div class="stock-change ${changeClass}">${changeSign}${m.change_percent.toFixed(2)}%</div>
+            </div>
+            <div class="stock-detail">
+                <span>今开 ${m.open}</span>
+                <span>最高 ${m.high}</span>
+                <span>最低 ${m.low}</span>
+                <span>昨收 ${m.prev_close}</span>
+            </div>
+        </div>
+        
+        <div class="report-section">
+            <div class="section-title">🎯 交易建议 <span class="tag">信心 ${(final.confidence*100).toFixed(0)}%</span></div>
+            <div class="signal-box">
+                <div class="signal-action">${final.action === 'buy' ? '📈 建议买入' : final.action === 'sell' ? '📉 建议卖出' : final.action === 'hold' ? '⏸️ 持仓观望' : '👀 谨慎观望'}</div>
+                <div class="signal-rationale">${sig.rationale || final.reason || '综合多空因素给出当前建议'}</div>
+                <div class="signal-prices">
+                    <div class="signal-price-item">
+                        <div class="label">入场价</div>
+                        <div class="value">${m.current_price}</div>
+                    </div>
+                    <div class="signal-price-item">
+                        <div class="label">目标价</div>
+                        <div class="value green">${sig.target_price || '-'}</div>
+                    </div>
+                    <div class="signal-price-item">
+                        <div class="label">止损价</div>
+                        <div class="value red">${sig.stop_loss || '-'}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="risk-row">
+                <div class="risk-item">
+                    <div class="label">建议仓位</div>
+                    <div class="value">${final.max_position || '-'}</div>
+                </div>
+                <div class="risk-item">
+                    <div class="label">风险等级</div>
+                    <div class="value ${d.risk?.risk_level === 'high' ? 'warn' : 'ok'}">${d.risk?.risk_level || '-'}</div>
+                </div>
+                <div class="risk-item">
+                    <div class="label">综合信心</div>
+                    <div class="value">${(final.confidence*100).toFixed(0)}%</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="report-section">
+            <div class="section-title">📊 三维信心</div>
+            <div class="analysis-grid">
+                <div class="analysis-item">
+                    <div class="label">技术面</div>
+                    <div class="value">${(d.technical?.confidence*100||0).toFixed(0)}%</div>
+                    <div class="sub">${d.technical?.trend || '-'}</div>
+                </div>
+                <div class="analysis-item">
+                    <div class="label">基本面</div>
+                    <div class="value">${(d.fundamental?.confidence*100||0).toFixed(0)}%</div>
+                    <div class="sub">${d.fundamental?.valuation || '-'}</div>
+                </div>
+                <div class="analysis-item">
+                    <div class="label">情绪面</div>
+                    <div class="value">${(sent?.confidence*100||0).toFixed(0)}%</div>
+                    <div class="sub">${sent?.market_sentiment || '-'}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="report-section">
+            <div class="section-title">⚔️ 多空辩论</div>
+            <div class="bull-bear">
+                <div class="bull-box">
+                    <div class="bb-header">
+                        <div class="bb-title bull">📈 看多</div>
+                        <div>
+                            <div class="bb-target">${bull.target_price || '-'}</div>
+                            <div class="bb-conf">信心 ${(bull.confidence*100).toFixed(0)}%</div>
+                        </div>
+                    </div>
+                    ${bullLines.slice(0,2).map(l => `<div class="bb-text">${l.replace(/^【.*?】/, '')}</div>`).join('')}
+                </div>
+                <div class="bear-box">
+                    <div class="bb-header">
+                        <div class="bb-title bear">📉 看空</div>
+                        <div>
+                            <div class="bb-target">${bear.target_price || '-'}</div>
+                            <div class="bb-conf">信心 ${(bear.confidence*100).toFixed(0)}%</div>
+                        </div>
+                    </div>
+                    ${bearLines.slice(0,2).map(l => `<div class="bb-text">${l.replace(/^【.*?】/, '')}</div>`).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // OpenRouter section (only for HK AI stocks)
+    if (leaderboard.length > 0) {
+        html += `
+        <div class="report-section">
+            <div class="section-title">📡 AI产业链 · OpenRouter周榜</div>
+            <table class="router-table">
+                <thead>
+                    <tr>
+                        <th>#</th><th>模型</th><th>厂商</th><th>调用量</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${leaderboard.slice(0, 8).map((v, i) => `
+                    <tr>
+                        <td class="rank">${i+1}</td>
+                        <td class="model">${(v.top_models && v.top_models[0]) ? v.top_models[0].substring(0,20) : '-'}</td>
+                        <td class="vendor ${v.is_chinese ? 'cn' : ''}">${v.is_chinese ? '🇨🇳' : ''}${v.vendor_cn || v.vendor}</td>
+                        <td class="tokens">${v.total_tokens_t.toFixed(2)}T</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+            ${insights.length > 0 ? `<p style="margin-top:12px;font-size:13px;color:#5a6c7d">💡 ${insights[0]}</p>` : ''}
+        </div>`;
+    }
+    
+    html += `
+        <div class="disclaimer">
+            本报告仅供参考，不构成投资建议。数据来源：Yahoo Finance / Tushare · ${m.date || new Date().toLocaleDateString()}
+        </div>
+    </div>`;
+    
+    document.getElementById('reportBox').innerHTML = html;
+}
+
+// History
+function getHistory() {
+    try { return JSON.parse(localStorage.getItem('stock_history') || '[]'); } 
+    catch { return []; }
+}
+
+function addToHistory(symbol, price, change, name) {
+    const h = getHistory().filter(x => x.symbol !== symbol);
+    h.unshift({ symbol, price, change, name, time: Date.now() });
+    localStorage.setItem('stock_history', JSON.stringify(h.slice(0, 10)));
+}
+
+function showState(state) {
+    document.getElementById('loadingBox').style.display = state === 'loading' ? 'block' : 'none';
+    document.getElementById('reportBox').style.display = state === 'report' ? 'block' : 'none';
+    document.getElementById('promptBox').style.display = state === 'prompt' ? 'block' : 'none';
+    document.getElementById('searchBtn').disabled = state === 'loading';
+}
+
+function hideError() {
+    document.getElementById('errorBox').style.display = 'none';
+}
+
+function showError(msg) {
+    const el = document.getElementById('errorBox');
+    el.textContent = msg;
+    el.style.display = 'block';
+}
+
+// Enter key
+document.getElementById('symbolInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+});
+
+// Init
+showState('prompt');
+</script>
+</body>
+</html>
