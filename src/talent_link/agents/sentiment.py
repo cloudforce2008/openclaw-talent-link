@@ -115,14 +115,15 @@ class SentimentAgent:
         获取近期新闻：标题 + 投资相关摘要
         返回结构化 dict 而非纯字符串
         """
-        # 股票 → 中文公司名/关键词
+        # 股票 → (中文公司名, Google News搜索关键词)
+        # 用公司全称+简称，避免娱乐/视频等非财经结果
         name_map = {
-            '2513': ('智谱AI', 'zhipuai OR 智谱'),
-            '0100': ('MiniMax', 'minimax AI'),
-            '0700': ('腾讯', '腾讯'),
-            '9988': ('阿里巴巴', '阿里巴巴'),
-            '3690': ('美团', '美团'),
-            '1810': ('小米', '小米'),
+            '2513': ('智谱AI',  '智谱AI'),
+            '0100': ('MiniMax', 'MiniMax'),
+            '0700': ('腾讯',    '腾讯控股'),
+            '9988': ('阿里巴巴','阿里巴巴'),
+            '3690': ('美团',    '美团'),
+            '1810': ('小米',    '小米集团'),
         }
 
         company_key = None
@@ -136,7 +137,10 @@ class SentimentAgent:
             return {'sentiment': 'neutral', 'news': [], 'highlights': []}
 
         try:
-            news = self._search_google_news(search_term, max_results=5)
+            # Google News (hl=zh-CN&gl=CN) 已覆盖新浪财经/东方财富/雪球/富途牛牛等中文源
+            # 够用，不再增加延迟高的第三方源
+            news = self._search_google_news(search_term, max_results=8)
+
             sentiment = self._sentiment_from_headlines(news)
             return {
                 'sentiment': sentiment,
@@ -160,15 +164,75 @@ class SentimentAgent:
         seen = set()
         for m in re.finditer(r"<title>([^<]+)</title>", xml):
             title = m.group(1).strip()
-            # 去重 + 去除 "... - Google 新闻"
             clean = re.sub(r'\s*-\s*Google\s*新闻\s*$', '', title).strip()
             if clean and clean not in seen and len(clean) > 5:
                 seen.add(clean)
                 titles.append(clean)
                 if len(titles) >= max_results:
                     break
-        time.sleep(0.3)  # 礼貌爬虫
+        time.sleep(0.3)
         return titles
+
+    def _search_ddg_news(self, query: str, max_results: int = 5) -> list:
+        """
+        通过 DuckDuckGo 新闻搜索获取中文财经新闻
+        DuckDuckGo 对中文支持较好，能返回财联社、证券时报、东方财富等中文源
+        """
+        import urllib.request, urllib.parse, re, time, json
+
+        titles = []
+        seen = set()
+
+        try:
+            # DuckDuckGo HTML search (免 API key)
+            encoded = urllib.parse.quote(query)
+            url = f"https://duckduckgo.com/html/?q={encoded}&df=mf&kl=cn-zh"  # kl=cn-zh 中文区域
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            })
+            resp = urllib.request.urlopen(req, timeout=10)
+            html = resp.read().decode("utf-8", errors="ignore")
+
+            # 提取新闻结果标题
+            # DuckDuckGo HTML 格式：<a class="result__a" href="...">标题</a>
+            for m in re.finditer(r'<a[^>]+class="[^"]*result[^"]*"[^>]+href="[^"]+"[^>]*>([^<]+)<', html):
+                t = m.group(1).strip()
+                t = re.sub(r'<[^>]+>', '', t).strip()  # 去掉残留HTML标签
+                if t and t not in seen and len(t) > 5:
+                    seen.add(t)
+                    titles.append(t)
+                    if len(titles) >= max_results:
+                        break
+
+            # 如果 HTML 解析不到，尝试 JSON 方式
+            if not titles:
+                # DuckDuckGo JSON API
+                json_url = f"https://duckduckgo.com/?q={encoded}&format=json&df=mf"
+                req2 = urllib.request.Request(json_url, headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json",
+                })
+                resp2 = urllib.request.urlopen(req2, timeout=8)
+                raw = resp2.read().decode("utf-8", errors="ignore")
+                # JSON 解析
+                try:
+                    data = json.loads(raw)
+                    results = data.get('Results', [])
+                    for r in results:
+                        for phrase in r.get('Text', []):
+                            t = phrase.strip()
+                            if t and t not in seen and len(t) > 5:
+                                seen.add(t)
+                                titles.append(t)
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"[Sentiment] DuckDuckGo failed: {e}")
+
+        return titles[:max_results]
 
     def _sentiment_from_headlines(self, headlines: list) -> str:
         """根据新闻标题判断情绪"""
