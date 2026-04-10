@@ -54,7 +54,8 @@ class TechnicalAgent:
             'indicators': indicators,
             'signals': signals,
             'confidence': confidence,
-            'analysis': self._generate_analysis_text(trend, indicators, signals)
+            'analysis': self._generate_analysis_text(trend, indicators, signals),
+            'forecast': self._forecast(market_data.get('current_price', 0), history, trend),
         }
     
     def _calculate_indicators(self, history: List[dict]) -> dict:
@@ -285,6 +286,72 @@ class TechnicalAgent:
         
         return min(confidence, 0.95)
     
+    def _forecast(self, current_price: float, history: list, trend: str) -> dict:
+        """
+        基于历史波动率估算未来不同时间维度的价格区间
+        方法：日收益率标准差 × √天数，不依赖历史均值（不可靠）
+        趋势方向只修正期望值，不放大波动区间
+        """
+        if len(history) < 10 or not current_price:
+            return {}
+
+        # 计算日收益率
+        closes = [h['close'] for h in history]
+        returns = []
+        for i in range(1, len(closes)):
+            if closes[i-1] > 0:
+                ret = (closes[i] - closes[i-1]) / closes[i-1]
+                returns.append(ret)
+
+        if not returns:
+            return {}
+
+        import statistics, math
+        daily_std = statistics.stdev(returns) if len(returns) > 1 else 0.02
+
+        # 趋势方向修正（只调期望值，不放大波动范围）
+        trend_drift = {
+            'strong_upward': 0.15,   # 强趋势月均+15%
+            'upward': 0.08,
+            'sideways': 0.0,
+            'downward': -0.08,
+            'strong_downward': -0.15,
+        }.get(trend, 0.0)
+
+        def price_range(days: int) -> dict:
+            """计算N天后的68%置信区间"""
+            vol = daily_std * math.sqrt(days)  # 波动幅度
+
+            # 期望值 = 当前价 + 趋势漂移（按天折算）
+            drift_fraction = trend_drift * (days / 21)  # 趋势月化后按天数比例
+            expected = current_price * (1 + drift_fraction)
+
+            # 区间 = 期望值 ± 1个标准差
+            band = current_price * vol
+            upper = expected + band
+            lower = max(expected - band, current_price * 0.5)  # 最低跌一半
+
+            # 波动率随时间稀释（短期波动大，长期趋于均值）
+            volatility_pct = round(vol * 100, 1)
+
+            return {
+                'expected': round(expected, 2),
+                'upper_68': round(upper, 2),
+                'lower_68': round(lower, 2),
+                'range_pct': volatility_pct,
+            }
+
+        forecast = {
+            'current_price': current_price,
+            'daily_volatility': round(daily_std * 100, 2),
+            'annualized_vol': round(daily_std * 252 * 100, 1),
+            '1_week': price_range(5),
+            '2_week': price_range(10),
+            '1_month': price_range(21),
+            '3_month': price_range(63),
+        }
+        return forecast
+
     def _generate_analysis_text(self, trend: str, indicators: dict, signals: List[str]) -> str:
         """生成分析文本"""
         texts = []
