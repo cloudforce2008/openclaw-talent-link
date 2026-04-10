@@ -9,7 +9,7 @@ Prediction Tracker - 预测追踪与胜率反馈系统
 
 import json
 import sys
-import uuid
+import time as _time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -50,7 +50,7 @@ def record_prediction(
     now = datetime.now()
 
     pred = {
-        "id": f"{symbol}_{uuid.uuid4().hex[:8]}",
+        "id": f"{symbol}_{int(_time.time()*1000000) % (16**8):08x}",
         "symbol": symbol,
         "name": name,
         "predicted_at": now.isoformat(),
