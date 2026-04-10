@@ -50,7 +50,7 @@ def generate_response(query: str, report: dict) -> dict:
     elif parsed.intent == "compare":
         reply = _compare_reply(name, price, change_str, tech, fund, bull, bear, signal, final)
     else:
-        reply = _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, signal, risk, final)
+        reply = _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, signal, risk, final, symbol=parsed.symbol)
 
     return {
         "reply": reply,
@@ -97,7 +97,7 @@ def _action_text(a):
     return {"buy": "建议买入", "sell": "建议卖出", "hold": "建议持仓", "wait": "建议观望"}.get(a, "待定")
 
 
-def _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, signal, risk, final):
+def _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, signal, risk, final, symbol=None):
     """分析型回复 - 完整的判断依据"""
     action = final.get("action", "wait")
     confidence = final.get("confidence", 0) * 100
@@ -151,7 +151,7 @@ def _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, sig
         lines.append(f"")
         lines.append(f"【市场情绪】{sent_text}")
 
-    # 全球宏观信号（来自 workspace 真实数据）
+    # 全球宏观信号 → 因果分析（不只是罗列数据）
     gs = sent.get("global_signals") or {}
     if gs:
         us_ai = gs.get("us_ai_leaders", {})
@@ -160,32 +160,65 @@ def _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, sig
         gold = (gs.get("commodities") or {}).get("gold") or {}
         oil = (gs.get("commodities") or {}).get("crude_oil") or {}
         geo = (gs.get("geopolitics") or {}).get("iran_israel") or {}
+        signals = gs.get("signals") or []
 
-        macro_parts = []
-        if nasdaq.get("change_percent") is not None:
-            v = nasdaq["change_percent"]
-            macro_parts.append(f"纳指 {v:+.2f}%")
-        if nvda.get("change_percent") is not None:
-            v = nvda["change_percent"]
-            macro_parts.append(f"NVDA {v:+.2f}%")
-        if gold.get("price"):
-            gv = gold.get("change_percent", 0)
-            macro_parts.append(f"黄金 ${gold['price']:.0f}({gv:+.2f}%)")
-        if oil.get("price"):
-            ov = oil.get("change_percent", 0)
-            macro_parts.append(f"原油 ${oil['price']:.1f}({ov:+.2f}%)")
+        macro_judgments = []
 
+        # 纳指
+        nasdaq_chg = nasdaq.get("change_percent")
+        if nasdaq_chg is not None:
+            if nasdaq_chg > 1:
+                macro_judgments.append(f"纳指+{nasdaq_chg:.2f}%→港股科技情绪支撑，利好映射")
+            elif nasdaq_chg < -1:
+                macro_judgments.append(f"纳指{nasdaq_chg:.2f}%→情绪传导偏空，港股科技承压")
+            else:
+                macro_judgments.append(f"纳指{nasdaq_chg:.2f}%→美股平稳，影响中性")
+
+        # NVDA（AI芯片情绪锚）
+        nvda_chg = nvda.get("change_percent")
+        is_ai_stock = any(k in (symbol or '') for k in ['2513', '0100', 'AI'])
+        if nvda_chg is not None:
+            if is_ai_stock:
+                if nvda_chg > 1:
+                    macro_judgments.append(f"NVDA+{nvda_chg:.2f}%→AI板块情绪向好，直接利好")
+                elif nvda_chg < -1:
+                    macro_judgments.append(f"NVDA{nvda_chg:.2f}%→AI上游情绪拖累，对{parsed.name or 'AI股'}偏利空")
+
+        # 黄金（避险 + 利率预期）
+        gold_chg = gold.get("change_percent", 0)
+        gold_price = gold.get("price")
+        if gold_price and gold_chg:
+            if gold_chg > 1:
+                macro_judgments.append(f"黄金${gold_price:.0f}(+{gold_chg:.2f}%)→避险升温+利率预期下降，成长股估值承压")
+            elif gold_chg < -1:
+                macro_judgments.append(f"黄金${gold_price:.0f}({gold_chg:.2f}%)→避险降温度+风险偏好回升，科技股受益")
+
+        # 原油（成本端 + 通胀）
+        oil_chg = oil.get("change_percent", 0)
+        oil_price = oil.get("price")
+        if oil_price and oil_chg:
+            if oil_chg > 3:
+                macro_judgments.append(f"原油${oil_price:.1f}(+{oil_chg:.2f}%)→通胀压力+成本上行，抑制科技股估值扩张")
+            elif oil_chg < -3:
+                macro_judgments.append(f"原油${oil_price:.1f}({oil_chg:.2f}%)→大宗商品回调→通胀压力缓解，利好科技")
+
+        # 地缘（风险资产折价）
         geo_status = geo.get("status", "")
-        geo_desc = geo.get("description_cn", "") or geo.get("description", "")
-        if geo_status and geo_desc:
-            geo_short = geo_desc[:30] + "..." if len(geo_desc) > 30 else geo_desc
-            macro_parts.append(f"地缘【{geo_status.upper()}】{geo_short}")
+        geo_desc_cn = geo.get("description_cn", "") or geo.get("description", "")
+        geo_impact = geo.get("impact", "")
+        if geo_status and geo_status.upper() not in ['CEASEFIRE', 'COLD']:
+            if geo_impact == 'risk_on':
+                macro_judgments.append(f"中东局势升温→全球风险资产短期承压，港股外资流向偏紧")
+            elif geo_impact == 'negative':
+                macro_judgments.append(f"地缘压力持续→风险偏好抑制，高估值成长股折价")
+            else:
+                macro_judgments.append(f"地缘【{geo_status.upper()}】{geo_desc_cn[:25]}→增加港股短线波动风险")
 
-        if macro_parts:
+        if macro_judgments:
             lines.append(f"")
-            lines.append(f"【全球宏观】")
-            for part in macro_parts:
-                lines.append(f"  · {part}")
+            lines.append(f"【全球宏观 → 逻辑判断】")
+            for j in macro_judgments:
+                lines.append(f"  → {j}")
 
     # 多空观点对比
     lines.append(f"")
