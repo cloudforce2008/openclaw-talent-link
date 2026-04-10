@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const app = express();
-const PORT = 8000;
+const PORT = process.env.PORT || 8000;
 
 // 中间件
 app.use(cors());
@@ -21,9 +21,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // 股票分析引擎路径
 const PYTHON_PATH = '/usr/bin/python3';
-const ANALYZER_PATH = path.join(__dirname, '../../agents/stock_analyst.py');
-// src/ 目录是 Python 模块根目录
-const SRC_PATH = path.join(__dirname, '../../');  // = /root/projects/openclaw-talent-link/src/
+const ANALYZER_PATH = path.join(__dirname, '../../../talent_link/agents/stock_analyst.py');
+const CHAT_PATH = path.join(__dirname, '../../../talent_link/chat.py');
+// server.js 在 src/talent_link/platform/web/
+// 项目根目录：需要 4 层 up
+const PROJECT_ROOT = path.join(__dirname, '../../../../');  // = /root/projects/openclaw-talent-link/
+// src/ 目录：需要 3 层 up
+const SRC_PATH = path.join(__dirname, '../../../');         // = /root/projects/openclaw-talent-link/src/
 
 // ============ 工具函数 ============
 
@@ -34,7 +38,7 @@ function runPython(script, args) {
             PATH: process.env.PATH
         };
         const proc = spawn(PYTHON_PATH, [script, ...args], {
-            cwd: SRC_PATH,
+            cwd: PROJECT_ROOT,
             env: env
         });
         
@@ -62,6 +66,39 @@ function runPython(script, args) {
     });
 }
 
+// ============ 对话式交互 ============
+
+// 对话式聊天接口 - 流式响应，避免超时
+app.post('/api/chat', async (req, res) => {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message is required' });
+
+    // 立即设置流式响应头，避免 OpenClaw 超时
+    res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Transfer-Encoding': 'chunked',
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache',
+    });
+
+    // 立即发送一个 "thinking" 信号，让客户端知道已收到请求
+    res.write(JSON.stringify({ type: 'status', status: 'thinking', message: '正在分析...' }) + '\n');
+
+    try {
+        const result = await runPython(CHAT_PATH, [message]);
+        const data = JSON.parse(result);
+
+        // 逐块发送，避免大 JSON 被截断
+        res.write(JSON.stringify({ type: 'result', ...data }) + '\n');
+        res.end();
+    } catch (err) {
+        console.error('聊天处理失败:', err.message);
+        res.write(JSON.stringify({ type: 'error', error: err.message }) + '\n');
+        res.end();
+    }
+});
+
+// ============ 路由 ============
 // ============ 路由 ============
 
 // 健康检查

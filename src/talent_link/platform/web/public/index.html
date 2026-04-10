@@ -415,7 +415,8 @@
 </div>
 
 <script>
-const API = '/api/stock';
+const API_STOCK = '/api/stock';
+const API_CHAT = '/api/chat';
 
 // Auto-detect market
 function detectMarket(symbol) {
@@ -432,28 +433,115 @@ function quickSearch(symbol) {
 }
 
 // Search
+// 处理流式响应（SSE JSON lines）
 async function doSearch() {
     const input = document.getElementById('symbolInput').value.trim();
     if (!input) return;
-    
+
     showState('loading');
     hideError();
-    
+    // 加载中时显示分析员状态
+    document.getElementById('loadingBox').innerHTML = `
+        <div class="spinner"></div>
+        <div id="analysisStatus">正在解析您的请求...</div>
+    `;
+
     try {
-        const res = await fetch(`${API}/${encodeURIComponent(input)}`);
+        const res = await fetch(API_CHAT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: input }),
+        });
+
         if (!res.ok) {
-            const err = await res.json();
+            const err = await res.json().catch(() => ({ error: '请求失败' }));
             showError(err.error || '分析失败');
             showState('prompt');
             return;
         }
-        const data = await res.json();
-        renderReport(data);
-        addToHistory(input, data.market_data.current_price, data.market_data.change_percent, data.market_data.name);
-        showState('report');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalData = null;
+
+        // 实时更新状态
+        const statusEl = document.getElementById('analysisStatus');
+        const updateStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const chunk = JSON.parse(line);
+                    if (chunk.type === 'status') {
+                        updateStatus(chunk.message || '分析中...');
+                    } else if (chunk.type === 'result') {
+                        finalData = chunk;
+                        updateStatus('分析完成，正在渲染...');
+                    } else if (chunk.type === 'error') {
+                        showError(chunk.error || '分析失败');
+                        showState('prompt');
+                        return;
+                    }
+                } catch (e) {
+                    // ignore parse errors for partial lines
+                }
+            }
+        }
+
+        if (finalData) {
+            // 有自然语言回复就显示
+            if (finalData.reply) {
+                renderChatReply(finalData);
+            }
+            // 有完整报告就渲染卡片
+            if (finalData.report) {
+                renderReport(finalData.report);
+                const m = finalData.report.market_data || {};
+                addToHistory(finalData.symbol || input, m.current_price, m.change_percent, m.name);
+                showState('report');
+            } else {
+                showState('prompt');
+            }
+        } else {
+            showError('未收到分析结果，请重试');
+            showState('prompt');
+        }
     } catch (e) {
         showError('网络错误: ' + e.message);
         showState('prompt');
+    }
+}
+
+// 渲染自然语言回复（聊天气泡）
+function renderChatReply(data) {
+    // 在报告卡片前插入一个聊天气泡
+    const existing = document.getElementById('chatReplyBox');
+    if (existing) existing.remove();
+
+    const box = document.createElement('div');
+    box.id = 'chatReplyBox';
+    box.style.cssText = 'background:#1a1a2e;color:#e8ecf0;border-radius:16px;padding:20px 24px;margin-bottom:20px;font-size:15px;line-height:1.7;';
+    box.innerHTML = `<div style="font-size:13px;color:#8892b0;margin-bottom:8px;">📊 股票分析员</div>
+        <div style="white-space:pre-wrap;'>${data.reply.replace(/\n/g,'<br>')}</div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid #2a2a4e;font-size:12px;color:#8892b0;">
+            代码 ${data.symbol} · ${data.intent} · 置信度 ${((data.confidence||0)*100).toFixed(0)}%
+        </div>`;
+
+    const main = document.querySelector('.main');
+    const searchBox = document.querySelector('.search-box');
+    if (searchBox && searchBox.nextSibling) {
+        main.insertBefore(box, searchBox.nextSibling);
+    } else {
+        main.insertBefore(box, main.firstChild);
     }
 }
 
