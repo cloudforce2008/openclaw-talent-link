@@ -154,7 +154,7 @@ class DataFetcher:
             return {}
     
     def _fetch_yahoo_quote(self, symbol: str) -> dict:
-        """获取Yahoo Finance实时报价"""
+        """获取Yahoo Finance实时报价（解析中文标签格式）"""
         try:
             result = subprocess.run(
                 ['node', self.yahoo_script, 'quote', symbol],
@@ -164,22 +164,24 @@ class DataFetcher:
             if result.returncode != 0:
                 return {}
             
+            import re
             quote = {}
-            for line in result.stdout.strip().split('\n'):
-                if '当前价格:' in line:
-                    quote['price'] = self._extract_number(line)
-                elif '涨跌幅:' in line:
-                    quote['change_percent'] = self._extract_number(line)
-                elif '前收盘:' in line:
-                    quote['prev_close'] = self._extract_number(line)
-                elif '开盘价:' in line:
-                    quote['open'] = self._extract_number(line)
-                elif '最高价:' in line:
-                    quote['high'] = self._extract_number(line)
-                elif '最低价:' in line:
-                    quote['low'] = self._extract_number(line)
-                elif '成交量:' in line:
-                    quote['volume'] = self._extract_number(line)
+            text = result.stdout
+            
+            # 匹配中文标签格式（支持货币前缀如 "HKD 503.50"）
+            patterns = {
+                'price': r'当前价格:\s*(?:HKD\s)?([\d,]+\.?\d*)',
+                'change_percent': r'涨跌幅:\s*([+-]?[\d,]+\.?\d*)%?',
+                'prev_close': r'前收盘:\s*(?:HKD\s)?([\d,]+\.?\d*)',
+                'open': r'开盘价:\s*(?:HKD\s)?([\d,]+\.?\d*)',
+                'high': r'最高价:\s*(?:HKD\s)?([\d,]+\.?\d*)',
+                'low': r'最低价:\s*(?:HKD\s)?([\d,]+\.?\d*)',
+                'volume': r'成交量:\s*([\d,]+)',
+            }
+            for key, pattern in patterns.items():
+                m = re.search(pattern, text)
+                if m:
+                    quote[key] = float(m.group(1).replace(',', ''))
             
             return quote
             
@@ -187,29 +189,41 @@ class DataFetcher:
             print(f"Yahoo报价失败 {symbol}: {e}")
             return {}
     
-    def _fetch_yahoo_history(self, symbol: str, days: int = 20) -> list:
-        """获取Yahoo Finance历史数据"""
+    def _fetch_yahoo_history(self, symbol: str, days: int = 60) -> list:
+        """获取Yahoo Finance历史数据（解析CSV格式）"""
         try:
             result = subprocess.run(
-                ['node', self.yahoo_script, 'history', symbol, str(days)],
+                ['node', self.yahoo_script, 'history', symbol, '--range', '3mo'],
                 capture_output=True, text=True, timeout=30
             )
             
             if result.returncode != 0:
                 return []
             
+            # 提取 CSV 区段
+            text = result.stdout
+            csv_start = text.find('__CSV_START__')
+            if csv_start < 0:
+                return []
+            
+            csv_end = text.find('__CSV_END__', csv_start)
+            csv_text = text[csv_start + 12:csv_end] if csv_end >= 0 else text[csv_start + 12:]
+            
             history = []
-            for line in result.stdout.strip().split('\n'):
-                parts = line.split(',')
-                if len(parts) >= 6 and parts[0].startswith('20'):
-                    history.append({
-                        'date': parts[0],
-                        'open': float(parts[1]) if parts[1] else 0,
-                        'high': float(parts[2]) if parts[2] else 0,
-                        'low': float(parts[3]) if parts[3] else 0,
-                        'close': float(parts[4]) if parts[4] else 0,
-                        'volume': float(parts[5]) if parts[5] else 0,
-                    })
+            for line in csv_text.strip().split('\n'):
+                parts = line.strip().split(',')
+                if len(parts) >= 5:
+                    try:
+                        history.append({
+                            'date': parts[0],
+                            'open': float(parts[1]),
+                            'high': float(parts[2]),
+                            'low': float(parts[3]),
+                            'close': float(parts[4]),
+                            'volume': float(parts[5]) if len(parts) > 5 else 0,
+                        })
+                    except (ValueError, IndexError):
+                        continue
             return history
         except Exception as e:
             print(f"Yahoo历史失败 {symbol}: {e}")

@@ -53,6 +53,8 @@ class MarketData:
     open: float
     prev_close: float
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    # 历史K线数据（用于技术指标计算）
+    history: list = field(default_factory=list)
     # A股额外字段
     amplitude: Optional[float] = None  # 振幅
     pe_ratio: Optional[float] = None  # 市盈率
@@ -162,6 +164,7 @@ class StockAnalyst:
             low=data.get('low', 0),
             open=data.get('open', 0),
             prev_close=data.get('prev_close', 0),
+            history=data.get('history', []),
             amplitude=data.get('amplitude'),
             pe_ratio=data.get('pe_ratio'),
             pb_ratio=data.get('pb_ratio'),
