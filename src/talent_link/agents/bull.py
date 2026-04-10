@@ -48,61 +48,74 @@ class BullAgent:
     def _generate_thesis(self, technical: dict, fundamental: dict, sentiment: dict) -> str:
         """生成看多核心逻辑（详细分析）"""
         lines = []
-        current_price = technical.get('current_price', 0)
-        support = technical.get('support_levels', [])
-        resistance = technical.get('resistance_levels', [])
         trend = technical.get('trend', 'unknown')
-        
+
+        # === 从真实新闻标题中提取看多论据（最重要！）===
+        news_highlights: list = sentiment.get('news_highlights', []) or []
+        news_texts = [text for _, text in news_highlights]  # [(tag, title), ...]
+        all_news_text = ' '.join(news_texts)
+
+        bull_news_lines = []
+        for tag, title in news_highlights:
+            title_lower = title.lower()
+            # 产品/技术突破
+            if any(kw in title for kw in ['发布', '突破', '创新高', '登顶', '首次', '重磅', 'GLM', '模型', '产品']):
+                bull_news_lines.append(f'{tag}：{title[:40]}')
+            # 评级上调/买入/增持
+            elif any(kw in title for kw in ['买入', '增持', '上调', '推荐', '跑赢', '强推']):
+                bull_news_lines.append(f'机构评级利好：{title[:40]}')
+            # 业绩超预期
+            elif any(kw in title for kw in ['超预期', '高增长', '增长', '盈利', '营收']):
+                bull_news_lines.append(f'业绩利好：{title[:40]}')
+            # 融资/战略合作
+            elif any(kw in title for kw in ['合作', '签约', '战略', '融资', '投资']):
+                bull_news_lines.append(f'业务进展：{title[:40]}')
+
+        if bull_news_lines:
+            lines.append(f'【最新动态利好】{"；".join(bull_news_lines[:2])}')
+
         # 技术面分析
         tech_analysis = []
         if 'oversold_bounce' in technical.get('signals', []):
             tech_analysis.append('RSI<30超卖区，MACD底背离，短期反弹概率>70%')
         if technical.get('bollinger') == 'below_lower':
-            tech_analysis.append(f'股价触及布林带下轨({support[0] if support else "N/A"}港元)，历史上此处反弹概率较高')
+            sup = technical.get('support_levels', [])
+            tech_analysis.append(f'股价触及布林带下轨({sup[0] if sup else "N/A"}元)，历史上此处反弹概率较高')
         if trend in ['upward', 'strong_upward']:
-            tech_analysis.append(f'均线多头排列，{trend}趋势， momentum 持续增强')
+            tech_analysis.append(f'均线多头排列，趋势向上，动能持续')
         if technical.get('volume_signal') == 'volume_surge':
             tech_analysis.append('成交量放大2倍以上，资金入场明显')
-        
         if tech_analysis:
             lines.append(f'【技术面】{"；".join(tech_analysis[:2])}')
-        
+
         # 基本面分析
         fund_analysis = []
         growth = fundamental.get('revenue_growth', 0)
         if growth > 50:
-            fund_analysis.append(f'收入同比增长{growth:.0f}%，远超行业平均水平，说明产品市场契合度高')
+            fund_analysis.append(f'收入同比增长{growth:.0f}%，远超行业平均')
         margin = fundamental.get('profit_margin', 0)
         if margin > 0:
-            fund_analysis.append(f'净利润率{margin:.1f}%，已实现盈利，财务状况健康')
+            fund_analysis.append(f'净利润率{margin:.1f}%，已实现盈利')
         elif growth > 100:
             fund_analysis.append(f'虽未盈利但收入增速{growth:.0f}%，规模效应下盈亏平衡可期')
         moat = fundamental.get('moat', '')
         if moat == 'strong':
-            fund_analysis.append('护城河评级：强，竞争对手难以复制其核心优势')
+            fund_analysis.append('护城河评级：强，竞争对手难以复制')
         elif moat == 'medium':
-            fund_analysis.append('护城河评级：中，具备一定的差异化竞争力')
-        
+            fund_analysis.append('护城河评级：中，具备差异化竞争力')
+
         if fund_analysis:
             lines.append(f'【基本面】{"；".join(fund_analysis[:2])}')
-        
-        # 情绪面分析
-        sent_analysis = []
-        if sentiment.get('news_sentiment') == 'positive':
-            sent_analysis.append('近期正面新闻密集，市场关注度高')
-        if sentiment.get('market_sentiment') in ['bearish', 'extremely_bearish']:
-            sent_analysis.append('反向指标：机构情绪极端悲观，往往是底部信号（巴菲特指标）')
-        short_int = sentiment.get('shortInterest', 0)
-        if short_int > 20:
-            sent_analysis.append(f'空头兴趣{short_int}%，空头回补可能推动股价上涨')
-        
-        if sent_analysis:
-            lines.append(f'【情绪面】{"；".join(sent_analysis[:1])}')
-        
-        # 综合结论
+
+        # 情绪面（基于真实新闻，不只是 coarse sentiment）
+        if bull_news_lines:
+            lines.append(f'【市场情绪】近期正面消息密集，机构与散户关注度双升')
+        elif sentiment.get('market_sentiment') in ['bearish', 'extremely_bearish']:
+            lines.append(f'【情绪面】机构情绪极端悲观，往往是底部反向信号')
+
         if not lines:
-            lines.append(f'【综合】当前估值具吸引力，下行空间有限，上行弹性充足')
-        
+            lines.append('【综合】当前估值具吸引力，下行空间有限，上行弹性充足')
+
         return '\n'.join(lines[:3])
     
     def _calculate_target(self, current: float, technical: dict) -> float:
@@ -121,20 +134,35 @@ class BullAgent:
         return round(target, 2)
     
     def _identify_catalysts(self, fundamental: dict, sentiment: dict) -> list:
-        """识别潜在催化剂"""
+        """识别潜在催化剂（从真实新闻中提取，不只是固定列表）"""
         catalysts = []
-        
+        news_highlights: list = sentiment.get('news_highlights', []) or []
+
+        # 从真实新闻中提取看多催化剂
+        for tag, title in news_highlights:
+            title_lower = title.lower()
+            if any(kw in title for kw in ['发布', '推出', '上线', '发布', '重磅']):
+                catalysts.append(f'【产品】{title[:35]}')
+            elif any(kw in title for kw in ['合作', '签约', '落地', '商业化']):
+                catalysts.append(f'【业务】{title[:35]}')
+            elif any(kw in title for kw in ['上调', '买入', '增持', '推荐', '跑赢']):
+                catalysts.append(f'【评级】{title[:35]}')
+            elif any(kw in title for kw in ['增长', '超预期', '营收', '盈利']):
+                catalysts.append(f'【业绩】{title[:35]}')
+
+        # 补充结构性催化剂
         if fundamental.get('sector') == 'AI大模型':
-            catalysts.extend([
-                'AI应用落地加速',
-                '新模型发布',
-                '大模型商业化进展'
-            ])
-        
-        if sentiment.get('news_sentiment') == 'positive':
-            catalysts.append('近期利好消息')
-        
-        return catalysts[:3]
+            catalysts.extend(['AI应用落地加速', '新模型发布', '大模型商业化'])
+
+        # 去重
+        seen = set()
+        deduped = []
+        for c in catalysts:
+            if c not in seen:
+                seen.add(c)
+                deduped.append(c)
+
+        return deduped[:4]
     
     def _identify_risks(self, technical: dict, fundamental: dict) -> list:
         """识别潜在风险（看多方的风险意识）"""
@@ -153,26 +181,43 @@ class BullAgent:
         return risks[:3]
     
     def _calculate_confidence(self, technical: dict, fundamental: dict, sentiment: dict) -> float:
-        """计算看多信心度"""
-        confidence = 0.5
-        
+        """计算看多信心度（基于真实新闻，不能只是固定值）"""
+        confidence = 0.4  # 基准稍低，靠真实论据抬升
+
         # 技术面加分
         if technical.get('trend') in ['upward', 'strong_upward']:
-            confidence += 0.15
+            confidence += 0.12
         if 'oversold_bounce' in technical.get('signals', []):
-            confidence += 0.1
-        
+            confidence += 0.08
+
         # 基本面加分
         if fundamental.get('revenue_growth', 0) > 50:
-            confidence += 0.1
+            confidence += 0.08
         if fundamental.get('moat') == 'strong':
-            confidence += 0.1
-        
-        # 情绪面加分（反向）
+            confidence += 0.08
+
+        # === 基于真实新闻标题加分（关键！）===
+        news_highlights: list = sentiment.get('news_highlights', []) or []
+        for tag, title in news_highlights:
+            if any(kw in title for kw in ['买入', '增持', '上调', '推荐', '跑赢']):
+                confidence += 0.10  # 机构评级利好
+                break
+        for tag, title in news_highlights:
+            if any(kw in title for kw in ['发布', '突破', '登顶', '创新高', '首次', '重磅']):
+                confidence += 0.10  # 产品/技术突破
+                break
+        for tag, title in news_highlights:
+            if any(kw in title for kw in ['增长', '超预期', '盈利']):
+                confidence += 0.08  # 业绩利好
+                break
+
+        # 情绪面（真实新闻支撑时加分）
+        if news_highlights:
+            confidence += 0.05  # 有实质新闻，信心加分
         if sentiment.get('market_sentiment') in ['bearish', 'extremely_bearish']:
-            confidence += 0.1  # 极端看空时看多 contrarian
-        
-        return min(confidence, 0.9)
+            confidence += 0.08  # 极端看空时逆向看多
+
+        return min(confidence, 0.95)
     
     def _extract_key_points(self, technical: dict, fundamental: dict, sentiment: dict) -> list:
         """提取关键论点"""
