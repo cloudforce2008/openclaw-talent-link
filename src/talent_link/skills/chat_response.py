@@ -10,6 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from talent_link.skills.nlp_parser import parse as parse_query
+from talent_link.skills.prediction_tracker import (
+    record_prediction,
+    get_calibrated_confidence,
+    get_summary,
+)
 
 
 def generate_response(query: str, report: dict) -> dict:
@@ -58,7 +63,52 @@ def generate_response(query: str, report: dict) -> dict:
         "symbol": parsed.symbol,
         "name": name,
         "needs_more_info": False,
+        "prediction_recorded": _record_if_needed(
+            parsed, report, final, price, name
+        ),
+        "win_rate": _get_win_rate_summary(),
     }
+
+
+def _record_if_needed(parsed, report, final, price, name) -> dict:
+    """记录预测供后续验证（仅针对有明确操作建议的分析）"""
+    action = final.get('action', '')
+    if action not in ('buy', 'sell'):
+        return {"recorded": False, "reason": "no strong signal"}
+
+    try:
+        tech = report.get('technical', {})
+        market_state = tech.get('trend', 'unknown')
+        direction = 'long' if action == 'buy' else 'short'
+
+        pred_id = record_prediction(
+            symbol=parsed.symbol,
+            name=name,
+            price_at_prediction=price,
+            direction=direction,
+            target_price=final.get('target_price', 0) or price,
+            stop_loss=final.get('stop_loss', 0) or price,
+            confidence=final.get('confidence', 0.5),
+            thesis_summary=(report.get('bull_case', {}).get('thesis', '') or '')[:100],
+            market_state=market_state,
+            valid_days=30,
+        )
+        return {"recorded": True, "prediction_id": pred_id}
+    except Exception as e:
+        return {"recorded": False, "error": str(e)}
+
+
+def _get_win_rate_summary() -> dict:
+    """获取当前胜率摘要（附加在回复meta里）"""
+    try:
+        s = get_summary()
+        return {
+            "total": s['total_predictions'],
+            "win_rate": s['win_rate'],
+            "acceptable_rate": s['acceptable_rate'],
+        }
+    except Exception:
+        return {}
 
 
 def _fmt_price(p):

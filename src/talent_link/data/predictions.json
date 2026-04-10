@@ -1,0 +1,73 @@
+{
+  "predictions": [
+    {
+      "id": "0700.HK_04f9765e",
+      "symbol": "0700.HK",
+      "name": "腾讯",
+      "predicted_at": "2026-04-10T12:43:46.469141",
+      "check_at": "2026-04-17T12:43:46.469141",
+      "price_at_prediction": 500.0,
+      "direction": "long",
+      "target_price": 550.0,
+      "stop_loss": 480.0,
+      "confidence": 0.65,
+      "thesis_summary": "测试论据1",
+      "market_state": "upward",
+      "status": "checked",
+      "outcome": "✅ 正确",
+      "score": 0.8,
+      "notes": "",
+      "checked_at": "2026-04-10T12:43:46.470819",
+      "actual_price": 540.0,
+      "deviation_pct": 8.0
+    },
+    {
+      "id": "0700.HK_dfd1db2b",
+      "symbol": "0700.HK",
+      "name": "腾讯",
+      "predicted_at": "2026-04-10T12:43:46.469619",
+      "check_at": "2026-04-17T12:43:46.469619",
+      "price_at_prediction": 900.0,
+      "direction": "long",
+      "target_price": 1000.0,
+      "stop_loss": 850.0,
+      "confidence": 0.65,
+      "thesis_summary": "测试论据2",
+      "market_state": "upward",
+      "status": "checked",
+      "outcome": "❌ 错误",
+      "score": 0.0,
+      "notes": "",
+      "checked_at": "2026-04-10T12:43:46.471321",
+      "actual_price": 870.0,
+      "deviation_pct": 3.33
+    },
+    {
+      "id": "0700.HK_788d1cc8",
+      "symbol": "0700.HK",
+      "name": "腾讯",
+      "predicted_at": "2026-04-10T12:43:46.470021",
+      "check_at": "2026-04-17T12:43:46.470021",
+      "price_at_prediction": 505.0,
+      "direction": "short",
+      "target_price": 470.0,
+      "stop_loss": 530.0,
+      "confidence": 0.65,
+      "thesis_summary": "测试论据3",
+      "market_state": "upward",
+      "status": "checked",
+      "outcome": "✅ 正确",
+      "score": 0.857,
+      "notes": "",
+      "checked_at": "2026-04-10T12:43:46.471761",
+      "actual_price": 475.0,
+      "deviation_pct": 5.94
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "correct": 2,
+    "wrong": 1,
+    "acceptable": 0
+  }
+}
