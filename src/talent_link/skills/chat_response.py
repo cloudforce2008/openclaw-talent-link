@@ -151,6 +151,42 @@ def _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, sig
         lines.append(f"")
         lines.append(f"【市场情绪】{sent_text}")
 
+    # 全球宏观信号（来自 workspace 真实数据）
+    gs = sent.get("global_signals") or {}
+    if gs:
+        us_ai = gs.get("us_ai_leaders", {})
+        nasdaq = us_ai.get("nasdaq") or {}
+        nvda = us_ai.get("nvda") or {}
+        gold = (gs.get("commodities") or {}).get("gold") or {}
+        oil = (gs.get("commodities") or {}).get("crude_oil") or {}
+        geo = (gs.get("geopolitics") or {}).get("iran_israel") or {}
+
+        macro_parts = []
+        if nasdaq.get("change_percent") is not None:
+            v = nasdaq["change_percent"]
+            macro_parts.append(f"纳指 {v:+.2f}%")
+        if nvda.get("change_percent") is not None:
+            v = nvda["change_percent"]
+            macro_parts.append(f"NVDA {v:+.2f}%")
+        if gold.get("price"):
+            gv = gold.get("change_percent", 0)
+            macro_parts.append(f"黄金 ${gold['price']:.0f}({gv:+.2f}%)")
+        if oil.get("price"):
+            ov = oil.get("change_percent", 0)
+            macro_parts.append(f"原油 ${oil['price']:.1f}({ov:+.2f}%)")
+
+        geo_status = geo.get("status", "")
+        geo_desc = geo.get("description_cn", "") or geo.get("description", "")
+        if geo_status and geo_desc:
+            geo_short = geo_desc[:30] + "..." if len(geo_desc) > 30 else geo_desc
+            macro_parts.append(f"地缘【{geo_status.upper()}】{geo_short}")
+
+        if macro_parts:
+            lines.append(f"")
+            lines.append(f"【全球宏观】")
+            for part in macro_parts:
+                lines.append(f"  · {part}")
+
     # 多空观点对比
     lines.append(f"")
     lines.append(f"【多空观点】")
@@ -178,7 +214,7 @@ def _analyze_reply(name, price, change_str, m, tech, fund, sent, bull, bear, sig
         lines.append(f"  风险等级：{risk_level}")
 
     lines.append(f"")
-    lines.append(f"---\n_数据来源：Yahoo Finance | 分析仅供参考，不构成投资建议_")
+    lines.append(f"---\n_技术面：Yahoo Finance 3个月K线 | 全球宏观：实时市场数据 | 分析仅供参考，不构成投资建议_")
 
     return "\n".join(lines)
 

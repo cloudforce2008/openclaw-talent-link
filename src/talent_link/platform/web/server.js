@@ -19,15 +19,12 @@ app.use(express.json());
 // 静态文件服务（前端页面）
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 股票分析引擎路径
+// 直接用绝对路径，避免 __dirname 在 PM2 下解析异常
 const PYTHON_PATH = '/usr/bin/python3';
-const ANALYZER_PATH = path.join(__dirname, '../../../talent_link/agents/stock_analyst.py');
-const CHAT_PATH = path.join(__dirname, '../../../talent_link/chat.py');
-// server.js 在 src/talent_link/platform/web/
-// 项目根目录：需要 4 层 up
-const PROJECT_ROOT = path.join(__dirname, '../../../../');  // = /root/projects/openclaw-talent-link/
-// src/ 目录：需要 3 层 up
-const SRC_PATH = path.join(__dirname, '../../../');         // = /root/projects/openclaw-talent-link/src/
+const PROJECT_ROOT = '/root/projects/openclaw-talent-link';
+const SRC_PATH = '/root/projects/openclaw-talent-link/src';
+const ANALYZER_PATH = '/root/projects/openclaw-talent-link/src/talent_link/agents/stock_analyst.py';
+const CHAT_PATH = '/root/projects/openclaw-talent-link/src/talent_link/chat.py';
 
 // ============ 工具函数 ============
 
