@@ -36,7 +36,7 @@ def fetch_actual_prices(symbols: list) -> dict:
     return prices
 
 
-def auto_check_predictions(actual_prices: dict) -> dict:
+def auto_check_predictions(actual_prices: dict, prediction_type: str = None) -> dict:
     """
     自动核查所有已到期且未核查的预测
     用传入的实际价格评分
@@ -111,64 +111,91 @@ def auto_check_predictions(actual_prices: dict) -> dict:
 
 
 def generate_report_text(report_data: dict) -> str:
-    """生成文字报告"""
+    """生成文字报告（双轨）"""
     s = report_data.get("summary", {})
     results = report_data.get("results", [])
+
+    def _rate_str(r):
+        return f"{r.get('win_rate', 0):.1f}%（{r.get('correct',0)}/{r.get('total',0)}）"
+
+    def _acceptable_str(r):
+        return f"{r.get('acceptable_rate', 0):.1f}%（{r.get('correct',0)+r.get('acceptable',0)}/{r.get('total',0)}）"
 
     lines = [
         "📊 **预测胜率周报**",
         "",
-        f"本周核查：{report_data['checked_count']} 条预测",
-        f"历史累计：{s.get('total_predictions', 0)} 条 | "
-        f"✅{s.get('correct', 0)} ⚠️{s.get('acceptable', 0)} ❌{s.get('wrong', 0)}",
-        f"胜率（严格）：{s.get('win_rate', 0)}%",
-        f"胜率（宽松）：{s.get('acceptable_rate', 0)}%",
+        f"本周核查：{report_data['checked_count']} 条（含每日+中期轨道）",
+        "",
+        "**【每日趋势】** 次日收盘价核查，追踪方向对错",
+        f"  胜率（严格）：{_rate_str(s.get('daily', {}))}",
+        f"  胜率（宽松）：{_acceptable_str(s.get('daily', {}))}",
+        "",
+        "**【中期趋势】** 30天核查，追踪目标价/止损",
+        f"  胜率（严格）：{_rate_str(s.get('monthly', {}))}",
+        f"  胜率（宽松）：{_acceptable_str(s.get('monthly', {}))}",
         "",
     ]
 
+    # 分轨道显示详情
     if results:
-        lines.append("**近期核查详情：**")
-        for r in results[-10:]:  # 最近10条
-            p = r["pred"]
-            verdict = r["verdict"]
-            score = r.get("score")
-            entry = p["price_at_prediction"]
-            actual = p.get("actual_price", "?")
-            target = p["target_price"]
-            direction = "📈" if p["direction"] == "long" else "📉"
-            score_str = f"{score:.0%}" if score is not None else "—"
-            lines.append(
-                f"{direction} {p['name']}({p['symbol']}) "
-                f"{entry}→{actual} | 目标{target} | {verdict} | 得分{score_str}"
-            )
-    else:
-        lines.append("本周无到期预测待核查。")
+        by_type = {}
+        for r in results:
+            pt = r['pred'].get('prediction_type', 'monthly')
+            by_type.setdefault(pt, []).append(r)
 
-    lines.append("")
+        for ptype in ['daily', 'monthly']:
+            if ptype not in by_type:
+                continue
+            label = "每日趋势" if ptype == 'daily' else "中期趋势"
+            lines.append(f"**【{label}】详情：**")
+            for r in by_type[ptype][-5:]:
+                p = r['pred']
+                icon = "📅" if ptype == 'daily' else "📆"
+                direction = "📈" if p['direction'] == 'long' else "📉"
+                score = f"{r['score']:.0%}" if r.get('score') is not None else "—"
+                actual = p.get('actual_price', '?')
+                entry = p['price_at_prediction']
+                lines.append(
+                    f"{icon}{direction} {p['name']}({p['symbol']}) "
+                    f"{entry}→{actual} | {r.get('verdict', '?')} | 得分{score}"
+                )
+            lines.append("")
+    else:
+        lines.append("本周无到期预测待核查。\n")
+
+    # 全局汇总
+    all_s = s.get('all', {})
+    lines.append(
+        f"_历史累计 {all_s.get('total', 0)} 条 ｜ "
+        f"正确 {all_s.get('correct', 0)} ｜ "
+        f"可接受 {all_s.get('acceptable', 0)} ｜ "
+        f"错误 {all_s.get('wrong', 0)}_\n"
+    )
     lines.append("_*仅供参考，不构成投资建议*_")
 
     return "\n".join(lines)
 
 
-def run():
-    """主入口：检查预测 + 生成报告"""
-    # 1. 收集所有活跃预测涉及的股票
+def run(prediction_type: str = None) -> dict:
+    """
+    核查到期预测 + 生成报告
+    prediction_type: None=全部 | 'daily'=每日趋势 | 'monthly'=中期趋势
+    """
     data = _load()
-    active_preds = [p for p in data["predictions"] if p["status"] == "active"]
+    active_preds = [
+        p for p in data["predictions"]
+        if p["status"] == "active"
+        and (prediction_type is None or p.get("prediction_type") == prediction_type)
+    ]
     symbols = list(set(p["symbol"] for p in active_preds))
-
-    # 2. 获取最新价格
     prices = fetch_actual_prices(symbols)
-
-    # 3. 自动核查到期预测
-    report_data = auto_check_predictions(prices)
-
-    # 4. 生成文字报告
+    report_data = auto_check_predictions(prices, prediction_type)
     report_text = generate_report_text(report_data)
     print(report_text)
-
     return report_data
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    pt = sys.argv[1] if len(sys.argv) > 1 else None
+    run(pt)

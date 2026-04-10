@@ -71,7 +71,12 @@ def generate_response(query: str, report: dict) -> dict:
 
 
 def _record_if_needed(parsed, report, final, price, name) -> dict:
-    """记录预测供后续验证（仅针对有明确操作建议的分析）"""
+    """
+    记录预测供后续验证：
+    - 每日趋势（daily）：次日核查，看方向对不对
+    - 中期趋势（monthly）：30天核查，看目标/止损
+    仅针对有明确买入/卖出信号时记录
+    """
     action = final.get('action', '')
     if action not in ('buy', 'sell'):
         return {"recorded": False, "reason": "no strong signal"}
@@ -80,32 +85,70 @@ def _record_if_needed(parsed, report, final, price, name) -> dict:
         tech = report.get('technical', {})
         market_state = tech.get('trend', 'unknown')
         direction = 'long' if action == 'buy' else 'short'
+        bull_thesis = (report.get('bull_case', {}).get('thesis', '') or '')[:80]
+        conf = final.get('confidence', 0.5)
 
-        pred_id = record_prediction(
+        # 技术面支撑/阻力用于计算每日预测的目标和止损
+        sup = tech.get('support_levels', [])
+        res = tech.get('resistance_levels', [])
+
+        ids = {}
+
+        # ── 1. 每日趋势预测（次日验证）─────────────────────────
+        # 每日目标：按趋势方向设1%空间
+        if direction == 'long':
+            daily_target = round(price * 1.01, 2)
+            daily_stop = round(price * 0.99, 2)
+        else:
+            daily_target = round(price * 0.99, 2)
+            daily_stop = round(price * 1.01, 2)
+
+        daily_id = record_prediction(
+            symbol=parsed.symbol,
+            name=name,
+            price_at_prediction=price,
+            direction=direction,
+            target_price=daily_target,
+            stop_loss=daily_stop,
+            confidence=conf,
+            thesis_summary=bull_thesis,
+            market_state=market_state,
+            prediction_type='daily',
+            valid_days=1,
+        )
+        ids['daily'] = daily_id
+
+        # ── 2. 中期趋势预测（30天验证）────────────────────────
+        monthly_id = record_prediction(
             symbol=parsed.symbol,
             name=name,
             price_at_prediction=price,
             direction=direction,
             target_price=final.get('target_price', 0) or price,
             stop_loss=final.get('stop_loss', 0) or price,
-            confidence=final.get('confidence', 0.5),
-            thesis_summary=(report.get('bull_case', {}).get('thesis', '') or '')[:100],
+            confidence=conf,
+            thesis_summary=bull_thesis,
             market_state=market_state,
+            prediction_type='monthly',
             valid_days=30,
         )
-        return {"recorded": True, "prediction_id": pred_id}
+        ids['monthly'] = monthly_id
+
+        return {"recorded": True, "prediction_ids": ids}
     except Exception as e:
         return {"recorded": False, "error": str(e)}
 
 
 def _get_win_rate_summary() -> dict:
-    """获取当前胜率摘要（附加在回复meta里）"""
+    """获取双轨胜率摘要"""
     try:
         s = get_summary()
         return {
-            "total": s['total_predictions'],
-            "win_rate": s['win_rate'],
-            "acceptable_rate": s['acceptable_rate'],
+            "all": s.get('all', {}).get('win_rate', 0),
+            "daily": s.get('daily', {}).get('win_rate', 0),
+            "monthly": s.get('monthly', {}).get('win_rate', 0),
+            "daily_count": s.get('daily', {}).get('total', 0),
+            "monthly_count": s.get('monthly', {}).get('total', 0),
         }
     except Exception:
         return {}
@@ -332,6 +375,8 @@ def _buy_reply(name, price, change_str, tech, fund, sent, signal, final, risk, s
     ind = tech.get("indicators", {})
     rsi = ind.get("rsi", 50)
     macd = ind.get("macd", "neutral")
+    sup = tech.get("support_levels", [])
+    res = tech.get("resistance_levels", [])
 
     lines = [
         f"📈 **{name}** {price} 元（{change_str}）",
@@ -369,13 +414,38 @@ def _buy_reply(name, price, change_str, tech, fund, sent, signal, final, risk, s
         lines.append(f"风险等级：{risk.get('risk_level', 'unknown')}")
 
     elif action in ["hold", "wait"]:
-        # 还没到最佳买点
+        # 还没到最佳买点 → 给出具体买卖价位
         bullish = []
         bearish = []
         if rsi < 30: bullish.append(f"RSI {rsi:.0f} 已超卖")
         elif rsi > 60: bearish.append(f"RSI {rsi:.0f} 偏高")
         if macd == "bullish_cross": bullish.append("MACD 形成金叉")
         if macd == "bearish_cross": bearish.append("MACD 尚未形成金叉")
+
+        # ── 计算买卖触发价位 ───────────────────────────────
+        # 买入触发：支撑位下方或当前价回落5%
+        buy_trigger = None
+        if sup:
+            # 支撑位已经很近（<10%）：等回调到支撑位再买
+            dist_to_sup = (price - sup[0]) / price
+            if dist_to_sup < 0.10:
+                buy_trigger = sup[0]
+                buy_logic = f"等跌到 {_fmt_price(sup[0])}（第1支撑位）再买"
+            else:
+                buy_trigger = round(sup[0] * 0.98, 2)
+                buy_logic = f"等 {_fmt_price(buy_trigger)}（支撑位 {_fmt_price(sup[0])} 附近）再买"
+        else:
+            buy_trigger = round(price * 0.95, 2)
+            buy_logic = f"等 {_fmt_price(buy_trigger)}（当前价回落5%）再买"
+
+        # 卖出触发：阻力位上方
+        if res:
+            sell_trigger = res[0]
+            sell_logic = f"涨到 {_fmt_price(res[0])}（第1阻力位）建议止盈"
+        else:
+            target = final.get('target_price', price)
+            sell_trigger = max(round(price * 1.08, 2), target)
+            sell_logic = f" {_fmt_price(sell_trigger)}（阻力位或目标价附近）建议止盈"
 
         lines.append(f"**我的建议：再等等，不急**")
         lines.append(f"")
@@ -385,8 +455,13 @@ def _buy_reply(name, price, change_str, tech, fund, sent, signal, final, risk, s
             lines.append(f"当前顾虑：{'，'.join(bearish)}")
         lines.append(f"")
         lines.append(f"理由：{final.get('reason', '当前价格未达到理想入场条件')}")
-        if sup := tech.get("support_levels", []):
-            lines.append(f"建议关注支撑位 {_fmt_price(sup[0])} 附近是否能企稳，企稳后再考虑买入。")
+        lines.append(f"")
+        lines.append(f"📌 **操作参考：**")
+        lines.append(f"  买入触发价：{buy_logic}")
+        lines.append(f"  卖出触发价：{sell_logic}")
+        if sup:
+            lines.append(f"  止损位： {_fmt_price(sup[0])}（有效跌破则止损）")
+        lines.append(f"")
         lines.append(f"置信度：{confidence:.0f}%")
 
     else:  # sell
